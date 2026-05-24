@@ -62,3 +62,7 @@ coverage.xml
 # mypy
 .mypy_cache/
 .dmypy.json
+
+# Claude Code config
+.claude/
+
