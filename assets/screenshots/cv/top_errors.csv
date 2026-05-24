@@ -1,0 +1,11 @@
+True,Predicted,Count,Total in class,Error rate
+cheesecake,chocolate_cake,10,250,4.0%
+sushi,sashimi,9,250,3.6%
+caesar_salad,greek_salad,8,250,3.2%
+miso_soup,ramen,7,250,2.8%
+greek_salad,caesar_salad,6,250,2.4%
+sashimi,sushi,5,250,2.0%
+ice_cream,chocolate_cake,5,250,2.0%
+chocolate_cake,cheesecake,5,250,2.0%
+ice_cream,cheesecake,4,250,1.6%
+pancakes,omelette,4,250,1.6%
