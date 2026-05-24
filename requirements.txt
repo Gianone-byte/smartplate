@@ -1,0 +1,41 @@
+# SmartPlate — fixed dependency versions for Python 3.11 + HF Spaces compatibility
+# Generated: 2026-05-24
+
+# UI
+gradio==4.44.0
+
+# Deep Learning / Computer Vision
+torch==2.3.1
+torchvision==0.18.1
+transformers==4.44.0
+datasets==2.21.0
+accelerate==0.33.0
+Pillow==10.4.0
+
+# Machine Learning
+scikit-learn==1.5.1
+xgboost==2.1.1
+pandas==2.2.2
+numpy==1.26.4
+
+# NLP / RAG
+chromadb==0.5.5
+sentence-transformers==3.1.1
+openai==1.42.0
+langchain==0.2.14
+langchain-community==0.2.12
+langchain-openai==0.1.22
+
+# Document loading
+pypdf==4.3.1
+
+# Utilities
+python-dotenv==1.0.1
+requests==2.32.3
+tqdm==4.66.5
+
+# Notebooks / EDA
+jupyter==1.1.1
+matplotlib==3.9.2
+seaborn==0.13.2
+ipywidgets==8.1.3
