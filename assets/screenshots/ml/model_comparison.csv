@@ -1,0 +1,6 @@
+Metric,Iter 1 (LogReg),Iter 2 (XGBoost)
+Test Accuracy,1.0000,0.9950
+Test F1 (macro),1.0000,0.9955
+CV Accuracy (mean),0.9988,0.9988
+CV Accuracy (std),0.0025,0.0025
+Training Speed,Fast (~1s),Moderate (~5s)
