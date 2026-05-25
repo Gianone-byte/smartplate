@@ -1,72 +1,94 @@
 """
 Block 1: Computer Vision — ViT inference wrapper.
 
-Loads the fine-tuned ViT model and exposes a single ``predict`` function
-that takes a PIL image and returns the predicted food class label.
+Loads the fine-tuned ViT model from HuggingFace Hub and classifies food images.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
+import logging
+from typing import Any, Dict, List, Optional
 
 from PIL import Image
 
+logger = logging.getLogger(__name__)
 
-MODEL_DIR = Path(__file__).parent.parent / "models" / "vit_food101_finetuned"
+_DEFAULT_MODEL_ID = "Gianone/smartplate-vit-food"
 
 
 class CVModel:
-    """Inference wrapper around the fine-tuned ViT food classifier.
+    """ViT food classifier loaded from HuggingFace Hub.
 
     Args:
-        model_dir: Path to the directory containing the saved ViT model
-            (``config.json``, ``model.safetensors``, ``preprocessor_config.json``).
-            Defaults to ``models/vit_food101_finetuned/``.
-
-    Example:
-        >>> model = CVModel()
-        >>> from PIL import Image
-        >>> img = Image.open("pizza.jpg")
-        >>> label, confidence = model.predict(img)
-        >>> print(label, confidence)
-        pizza 0.94
+        model_id: HuggingFace Hub model repository ID.
     """
 
-    def __init__(self, model_dir: Optional[str] = None) -> None:
-        self.model_dir = Path(model_dir) if model_dir else MODEL_DIR
+    def __init__(self, model_id: str = _DEFAULT_MODEL_ID) -> None:
+        self.model_id = model_id
         self._model = None
         self._processor = None
 
-    def load(self) -> None:
-        """Load model and processor from disk into memory.
+    def _load(self) -> None:
+        """Lazy-load model and processor from HuggingFace Hub."""
+        try:
+            from transformers import ViTForImageClassification, ViTImageProcessor
+        except ImportError as exc:
+            raise ImportError(
+                "transformers is required for CV inference. "
+                "Run: pip install transformers torch"
+            ) from exc
 
-        Called lazily on first ``predict`` call, or explicitly for warm-up.
+        logger.info("Loading CV model from %s ...", self.model_id)
+        try:
+            self._processor = ViTImageProcessor.from_pretrained(self.model_id)
+            self._model = ViTForImageClassification.from_pretrained(self.model_id)
+            self._model.eval()
+            logger.info(
+                "CV model loaded (%d classes)", self._model.config.num_labels
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load CV model '{self.model_id}'. "
+                f"Check your internet connection and HuggingFace credentials.\n{exc}"
+            ) from exc
 
-        Raises:
-            FileNotFoundError: If ``model_dir`` does not exist.
-        """
-        # TODO: Implement after training notebook 02 is complete.
-        # from transformers import ViTForImageClassification, ViTImageProcessor
-        # self._processor = ViTImageProcessor.from_pretrained(self.model_dir)
-        # self._model = ViTForImageClassification.from_pretrained(self.model_dir)
-        # self._model.eval()
-        raise NotImplementedError("Train the model first via notebook 02_train_vit_cv.ipynb.")
-
-    def predict(self, image: Image.Image) -> tuple[str, float]:
-        """Classify a food image and return the top-1 label with confidence.
-
-        Args:
-            image: A PIL Image (any mode; will be converted to RGB internally).
+    def predict(self, image: Image.Image) -> Dict[str, Any]:
+        """Classify a food image.
 
         Returns:
-            A tuple ``(label, confidence)`` where ``label`` is the predicted
-            Food-101 class name (e.g. ``"pizza"``) and ``confidence`` is the
-            softmax probability of the top prediction (0.0–1.0).
-
-        Raises:
-            RuntimeError: If the model has not been loaded yet.
+            {
+                "class": str,         # top-1 food class name
+                "confidence": float,  # softmax probability 0..1
+                "top_5": [{"class": str, "confidence": float}, ...]
+            }
         """
         if self._model is None:
-            self.load()
-        raise NotImplementedError("Implement after training is complete.")
+            self._load()
+
+        import torch
+        import torch.nn.functional as F
+
+        img = image.convert("RGB")
+        inputs = self._processor(images=img, return_tensors="pt")
+
+        with torch.no_grad():
+            logits = self._model(**inputs).logits
+            probs = F.softmax(logits, dim=-1)[0]
+
+        k = min(5, probs.shape[0])
+        top_values, top_indices = probs.topk(k)
+
+        id2label = self._model.config.id2label
+        top_5: List[Dict[str, Any]] = [
+            {
+                "class": id2label[idx.item()],
+                "confidence": round(float(val.item()), 4),
+            }
+            for val, idx in zip(top_values, top_indices)
+        ]
+
+        return {
+            "class": top_5[0]["class"],
+            "confidence": top_5[0]["confidence"],
+            "top_5": top_5,
+        }

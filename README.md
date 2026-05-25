@@ -61,6 +61,16 @@ Each block's output is the next block's input — this is a **pipeline**, not is
 
 ---
 
+## Running locally
+
+1. Activate venv: `source .venv/bin/activate`
+2. Install deps: `pip install -r requirements.txt`
+3. Copy `.env.example` to `.env` and add OPENAI_API_KEY
+4. Run: `python app.py`
+5. Open browser at http://127.0.0.1:7860
+
+---
+
 ## Local Setup
 
 ### Prerequisites

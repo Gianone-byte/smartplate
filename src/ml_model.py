@@ -1,38 +1,27 @@
 """
-Block 2: ML Health Classifier — Open Food Facts lookup + XGBoost scoring.
-
-Takes a food label from Block 1, fetches nutritional data from Open Food Facts,
-and returns a health score and category using the trained XGBoost model.
+Block 2: ML Health Classifier — USDA nutrition lookup + Logistic Regression scoring.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
+import numpy as np
 
-MODEL_PATH = Path(__file__).parent.parent / "models" / "xgb_health_classifier.pkl"
+logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = Path(__file__).parent.parent
+_DEFAULT_MODEL_PATH = _PROJECT_ROOT / "models" / "health_classifier.pkl"
 
 
 @dataclass
 class NutritionResult:
-    """Output of the ML block, passed as input to Block 3 (RAG).
+    """Nutrition result dataclass — kept for backward compatibility with tests.
 
-    Attributes:
-        food_label: The dish name from Block 1 (e.g. ``"pizza"``).
-        energy_kcal: Energy per 100g in kcal.
-        fat_g: Total fat per 100g in grams.
-        saturated_fat_g: Saturated fat per 100g in grams.
-        sugars_g: Total sugars per 100g in grams.
-        fiber_g: Dietary fiber per 100g in grams.
-        proteins_g: Protein per 100g in grams.
-        salt_g: Salt per 100g in grams.
-        health_score: Numeric health score 0–100 (higher = healthier).
-        health_label: Human-readable category: ``"healthy"``, ``"moderate"``,
-            or ``"unhealthy"``.
-        nutriscore: Nutri-Score grade (``"a"`` through ``"e"``), or ``None``
-            if not available.
+    Attributes mirror the USDA-based nutritional values per 100g.
     """
 
     food_label: str
@@ -49,54 +38,132 @@ class NutritionResult:
 
 
 class MLModel:
-    """Open Food Facts lookup and XGBoost health classifier.
+    """USDA nutrition lookup + Logistic Regression health classifier.
+
+    The model bundle (``health_classifier.pkl``) contains:
+    - ``model``: fitted LogisticRegression
+    - ``scaler``: fitted StandardScaler
+    - ``label_encoder``: fitted LabelEncoder (healthy / medium / unhealthy)
+    - ``feature_cols``: list of 16 feature column names
+    - ``usda_nutrition``: dict of curated nutrition data per food class
 
     Args:
-        model_path: Path to the saved XGBoost model (``.pkl`` file).
-            Defaults to ``models/xgb_health_classifier.pkl``.
-
-    Example:
-        >>> model = MLModel()
-        >>> result = model.predict("pizza")
-        >>> print(result.health_label, result.health_score)
-        unhealthy 28.5
+        model_path: Override path to the ``.pkl`` bundle.
     """
 
     def __init__(self, model_path: Optional[str] = None) -> None:
-        self.model_path = Path(model_path) if model_path else MODEL_PATH
-        self._classifier = None
+        self.model_path = Path(model_path) if model_path else _DEFAULT_MODEL_PATH
+        self._classifier: Optional[Dict[str, Any]] = None
 
-    def load(self) -> None:
-        """Load the XGBoost classifier from disk.
+    def _load(self) -> None:
+        """Lazy-load the model bundle from disk using joblib."""
+        try:
+            import joblib
+        except ImportError as exc:
+            raise ImportError(
+                "joblib is required. Run: pip install joblib"
+            ) from exc
 
-        Raises:
-            FileNotFoundError: If ``model_path`` does not exist.
+        if not self.model_path.exists():
+            raise FileNotFoundError(
+                f"Model bundle not found: {self.model_path}. "
+                "Run notebook 03_ml_health_classifier.ipynb first."
+            )
+
+        logger.info("Loading ML model from %s ...", self.model_path)
+        self._classifier = joblib.load(self.model_path)
+        logger.info(
+            "ML model loaded (type: %s, accuracy: %.4f)",
+            self._classifier.get("model_type"),
+            self._classifier.get("test_accuracy", 0),
+        )
+
+    def _build_features(self, nutrition: Dict[str, float]) -> np.ndarray:
+        """Compute 16 model features from 8 base USDA nutrients.
+
+        Feature engineering mirrors Notebook 03 (cell 8 / cell 17).
         """
-        # TODO: Implement after training notebook 03 is complete.
-        # import pickle
-        # with open(self.model_path, "rb") as f:
-        #     self._classifier = pickle.load(f)
-        raise NotImplementedError("Train the model first via notebook 03_ml_health_classifier.ipynb.")
+        kcal = nutrition["kcal"]
+        fat = nutrition["fat"]
+        sat_fat = nutrition["sat_fat"]
+        carbs = nutrition["carbs"]
+        sugar = nutrition["sugar"]
+        fiber = nutrition["fiber"]
+        protein = nutrition["protein"]
+        salt = nutrition["salt"]
 
-    def predict(self, food_label: str) -> NutritionResult:
-        """Fetch nutritional data and compute a health score for a given dish.
+        feature_map: Dict[str, float] = {
+            "kcal": kcal,
+            "fat": fat,
+            "sat_fat": sat_fat,
+            "carbs": carbs,
+            "sugar": sugar,
+            "fiber": fiber,
+            "protein": protein,
+            "salt": salt,
+            "sugar_to_carb_ratio": sugar / (carbs + 1e-6),
+            "sat_fat_pct_of_fat": sat_fat / (fat + 1e-6),
+            "calorie_density": kcal / 100,
+            "protein_to_kcal": protein * 4 / (kcal + 1e-6),
+            "fiber_to_carb_ratio": fiber / (carbs + 1e-6),
+            "high_sugar": float(sugar > 15),
+            "high_salt": float(salt > 1.5),
+            "high_sat_fat": float(sat_fat > 5),
+        }
 
-        Pipeline:
-        1. Query Open Food Facts API for ``food_label``
-        2. Average nutritional values across top matching products
-        3. Run XGBoost classifier to produce health score and label
+        cols = self._classifier["feature_cols"]
+        return np.array([[feature_map[c] for c in cols]])
+
+    def predict(self, food_class: str) -> Dict[str, Any]:
+        """Look up USDA nutrition and predict health label.
 
         Args:
-            food_label: Dish name as returned by Block 1 (e.g. ``"pizza"``).
+            food_class: Food class name as returned by CVModel (e.g. ``"pizza"``).
 
         Returns:
-            A ``NutritionResult`` dataclass with nutritional values and
-            health classification.
+            {
+                "food_class": str,
+                "nutrition": {"kcal": float, "fat": float, "sat_fat": float,
+                              "carbs": float, "sugar": float, "fiber": float,
+                              "protein": float, "salt": float},
+                "health_label": str,   # "healthy" | "medium" | "unhealthy"
+                "probabilities": {"healthy": float, "medium": float, "unhealthy": float}
+            }
 
         Raises:
-            ValueError: If no matching products are found in Open Food Facts.
-            RuntimeError: If the model has not been loaded.
+            ValueError: If ``food_class`` is not in the USDA nutrition table.
+            FileNotFoundError: If the model bundle is missing.
         """
         if self._classifier is None:
-            self.load()
-        raise NotImplementedError("Implement after training is complete.")
+            self._load()
+
+        bundle = self._classifier
+        usda: Dict[str, Dict[str, float]] = bundle["usda_nutrition"]
+
+        normalized = food_class.lower().replace(" ", "_").replace("-", "_")
+        if normalized not in usda:
+            raise ValueError(
+                f"Unknown food class: '{food_class}'. "
+                f"Supported: {sorted(usda.keys())}"
+            )
+
+        nutrition = usda[normalized]
+        X = self._build_features(nutrition)
+        X_scaled = bundle["scaler"].transform(X)
+
+        pred_idx = bundle["model"].predict(X_scaled)[0]
+        proba = bundle["model"].predict_proba(X_scaled)[0]
+
+        le = bundle["label_encoder"]
+        health_label = str(le.inverse_transform([pred_idx])[0])
+        probabilities = {
+            str(cls): round(float(p), 4)
+            for cls, p in zip(le.classes_, proba)
+        }
+
+        return {
+            "food_class": normalized,
+            "nutrition": nutrition,
+            "health_label": health_label,
+            "probabilities": probabilities,
+        }
