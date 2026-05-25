@@ -19,6 +19,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import gradio as gr
+
+# Monkey-patch for Gradio 4.36 bool-iteration bug
+import gradio_client.utils as _gradio_client_utils
+_original_get_type = _gradio_client_utils.get_type
+
+def _patched_get_type(schema):
+    if not isinstance(schema, dict):
+        return "Any"
+    return _original_get_type(schema)
+
+_gradio_client_utils.get_type = _patched_get_type
+
 from PIL import Image
 
 from src.pipeline import SmartPlatePipeline
