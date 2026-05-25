@@ -1,0 +1,3 @@
+strategy,Avg Keyword Coverage,Source Match Rate,Avg Tokens
+Strategy 1 (Basic),0.594,0.875,356.0
+Strategy 2 (Structured XML),0.365,0.875,493.75

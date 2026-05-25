@@ -1,0 +1,20 @@
+{
+  "best_strategy": "Strategy 1 (Basic)",
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "llm_model": "gpt-4o-mini",
+  "chunk_size": 500,
+  "chunk_overlap": 100,
+  "top_k": 3,
+  "knowledge_sources": [
+    "who_healthy_diet.pdf",
+    "dge_10_regeln.pdf",
+    "harvard_healthy_eating.pdf"
+  ],
+  "total_chunks": 80,
+  "evaluation_summary": {
+    "strategy_1_keyword_coverage": 0.59375,
+    "strategy_2_keyword_coverage": 0.3645833333333333,
+    "strategy_1_avg_tokens": 356.0,
+    "strategy_2_avg_tokens": 493.75
+  }
+}
