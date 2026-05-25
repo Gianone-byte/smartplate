@@ -1,446 +1,351 @@
 # SmartPlate – AI Nutrition Assistant
 
-**Documentation for the ZHAW "KI-Anwendungen" Module (FS 2026) – Free Project**
+## Project Metadata
 
-| | |
-|---|---|
-| **Author** | Gianpiero Dell'Aquila |
-| **Submission date** | 25 May 2026 |
-| **GitHub** | [github.com/Gianone-byte/smartplate](https://github.com/Gianone-byte/smartplate) |
-| **Live Demo** | [huggingface.co/spaces/Gianone/smartplate](https://huggingface.co/spaces/Gianone/smartplate) |
-| **Blocks combined** | Computer Vision + ML Numeric + NLP/RAG  |
+- **Project title:** SmartPlate – AI Nutrition Assistant
+- **Student:** Gianpiero Dell'Aquila
+- **GitHub repository URL:** https://github.com/Gianone-byte/smartplate
+- **Deployment URL:** https://huggingface.co/spaces/Gianone/smartplate
+- **Submission date:** 25 May 2026
+
+### Mandatory Setup Checks
+
+- [x] At least 2 blocks selected
+- [x] Multiple and different data sources used
+- [x] Deployment URL provided
+- [x] Required GitHub users added to repository (`jasminh`, `bkuehnis`)
+
+## Selected AI Blocks
+
+- [x] ML Numeric Data
+- [x] NLP
+- [x] Computer Vision
+
+Primary blocks used for core solution (choose 2):
+- **Primary block 1:** Computer Vision (Vision Transformer on Food-101)
+- **Primary block 2:** NLP / RAG (LLM with retrieval over WHO/DGE/Harvard guidelines)
+
+**Third block (extra work, graded separately):** ML Numeric Data (health classification from nutrient features) — see Section 5 (Bonus Evidence) and the dedicated block section 2A.
 
 ---
 
-## 1. Project Idea & Methodology
+## 1. Project Foundation (Short)
 
-### Problem Definition
+### 1.1 Problem Definition
 
-Modern consumers want to make healthier food choices, but barriers stand in the way: nutritional information is rarely available at the point of consumption (e.g. when eating out), and even when nutritional labels exist, interpreting them in the context of personal health goals requires expert knowledge. People typically reach for diet apps that require **manual logging** of every meal — a friction point that explains the high abandonment rate of such apps.
+- **Problem statement:** Health-conscious users want quick nutritional analysis of meals, but existing diet-tracking apps require manual logging of every meal — a friction point that explains their high abandonment rate. Nutritional information is rarely available at the point of consumption (e.g. when eating out), and even when labels exist, interpreting them in the context of personal health goals requires expert knowledge.
 
-**SmartPlate** is a multi-modal AI nutrition assistant that removes this friction. The user simply photographs a meal; the system recognises the dish, estimates nutritional values, classifies its overall healthiness, and produces a personalised, evidence-based explanation grounded in authoritative nutrition guidelines (WHO, German Nutrition Society, Harvard School of Public Health).
+- **Goal:** Build a multi-modal AI nutrition assistant where the user photographs a meal and receives: (1) a food-class detection, (2) per-100g nutritional values + a health classification, and (3) a personalised, evidence-based explanation grounded in authoritative nutrition guidelines (WHO, DGE, Harvard).
 
-### Motivation
+- **Success criteria:**
+  - CV model: ≥90% accuracy on a 20-class held-out validation set
+  - ML model: classifier successfully distinguishes the three health tiers (healthy/medium/unhealthy) with macro-F1 ≥0.85
+  - RAG: answers cite at least one retrieved source per response, with no factual hallucinations on test questions
+  - End-to-end: deployed app responds to a real food photo with all three outputs in under 30 seconds (steady-state)
 
-- **Realistic use case** — Health-conscious users (athletes, people with dietary restrictions, those tracking macros) who want quick analysis without manual entry.
-- **Bridges three modalities** — Vision (the photo), structured data (nutrient values), and language (the personalised advice). These are exactly the three modalities studied in the course.
-- **Demonstrates production-relevant patterns** — Pipeline orchestration, retrieval-augmented generation, model-versus-model comparisons, evaluation under uncertainty.
+### 1.2 Integration Logic
 
-### Block Combination — All Three
+- **How the selected blocks interact:** The blocks form a strict pipeline. The Computer Vision block classifies the input image into one of 20 food classes. This class is the **key** that drives the ML Numeric block's nutrient lookup and health-tier classification. The food class + nutrient values + health tier are then **injected as context** into the NLP/RAG block's prompt, which retrieves the most relevant chunks from the WHO/DGE/Harvard knowledge base and generates a personalised response. No block can be removed without breaking the others.
 
-This project intentionally combines **all three blocks** of the course (Computer Vision, ML Numeric, NLP/RAG) — the bonus option, not the minimum two.
-
-The three blocks are **conceptually and technically integrated** rather than juxtaposed:
+- **Data and output flow between blocks:**
 
 ```
-        ┌─────────────────────────────────┐
-        │  📷 USER UPLOADS A FOOD PHOTO   │
-        └──────────────┬──────────────────┘
-                       ▼
-        ┌─────────────────────────────────┐
-        │  🔍 CV BLOCK                    │
-        │  Vision Transformer (ViT)       │
-        │  fine-tuned on Food-101         │
-        │  Output: food class + confidence│
-        └──────────────┬──────────────────┘
-                       ▼ class="pizza"
-        ┌─────────────────────────────────┐
-        │  📊 ML BLOCK                    │
-        │  Logistic Regression on         │
-        │  USDA-derived nutrient features │
-        │  Output: nutrition + health tier│
-        └──────────────┬──────────────────┘
-                       ▼ kcal=266, label="unhealthy"
-        ┌─────────────────────────────────┐
-        │  💬 NLP/RAG BLOCK               │
-        │  ChromaDB retrieval + GPT-4o    │
-        │  Context: WHO / DGE / Harvard   │
-        │  Output: personalised advice    │
-        └──────────────┬──────────────────┘
-                       ▼
-        ┌─────────────────────────────────┐
-        │  🎨 GRADIO UI                   │
-        │  Image preview + nutrition card │
-        │  + AI explanation with sources  │
-        └─────────────────────────────────┘
+[User uploads photo]
+       ↓
+[CV: ViT predicts food_class + confidence]
+       ↓ food_class="pizza"
+[ML: lookup nutrition + predict health_label]
+       ↓ {kcal=266, fat=10g, ..., health_label="unhealthy"}
+[NLP: retrieve top-3 chunks → build prompt → LLM generates answer]
+       ↓ {answer, sources}
+[Gradio UI: display all three outputs side by side]
 ```
 
-The **CV output drives the ML lookup**, and the **CV+ML outputs together condition the NLP prompt**. No block is replaceable without affecting the others — that is what we mean by "integrated".
-
-### Scope
-
-**In scope:** 20 food classes (selected from Food-101), three nutrition guidelines as the RAG knowledge base, a single web interface, English-language output.
-
-**Out of scope:** Portion-size estimation from images (would need depth sensors or reference objects), allergen detection, multi-language UI, user accounts/history.
+See [`src/pipeline.py`](src/pipeline.py) for the orchestration logic.
 
 ---
 
-## 2. Data & Preprocessing
+## 2. Block Documentation
 
-### 2.1 Computer Vision Block
+### 2A. ML Numeric Data
 
-**Dataset:** [Food-101](https://www.kaggle.com/datasets/dansbecker/food-101) — 101 food classes, 1000 images per class. We selected a **20-class subset** that spans the full health spectrum:
+#### 2A.1 Data Source(s)
 
-| Health tier | Classes |
-|---|---|
-| Healthy (5) | caesar_salad, greek_salad, edamame, miso_soup, grilled_salmon |
-| Medium (8) | sushi, sashimi, spaghetti_bolognese, pad_thai, chicken_curry, omelette, pancakes, ramen |
-| Unhealthy (7) | pizza, hamburger, french_fries, donuts, cheesecake, ice_cream, chocolate_cake |
+| Entry | Source name or link | Type | Size | Role in this block |
+| --- | --- | --- | --- | --- |
+| 1 | [USDA FoodData Central](https://fdc.nal.usda.gov/) (curated reference values, see [`notebooks/03_ml_health_classifier.ipynb`](notebooks/03_ml_health_classifier.ipynb)) | Structured nutrient values | 20 classes × 8 nutrients | Source of ground-truth nutrition per food class |
+| 2 | Augmented dataset (USDA values + ±15% Gaussian noise) | Tabular numeric | 1000 rows × 16 features | Training data for the health classifier |
+| 3 | Open Food Facts API (initial attempt — see honest discussion in 2A.2) | Crowdsourced structured | Variable | Originally planned source; abandoned after 503 errors and data-quality issues |
 
-This selection was deliberate: a balanced spread of health categories so the downstream ML classifier has meaningful variance to learn from.
+#### 2A.2 Preprocessing and Features
 
-**Splits:** 750 train + 250 validation per class → 15 000 train / 5 000 validation.
+- **Cleaning steps:**
+  - **Original plan:** Open Food Facts API for all 20 classes. Result: 8 of 20 classes returned 503 Server Errors during scraping, and the 12 successful classes had nonsensical medians (every class ~51 kcal/100g) because OFF's full-text search returned irrelevant products (e.g. "caesar salad" matched "mineral water" and "milk").
+  - **Pivot:** USDA reference values per 100g for all 20 classes, sourced manually from USDA FoodData Central and the Swiss nutrition database. Eight nutrients per class: kcal, fat, saturated_fat, carbs, sugar, fiber, protein, salt.
 
-**Preprocessing:**
-- Resize to 224×224 (ViT requirement)
-- ImageNet normalisation (mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225])
-- Random horizontal flip + colour jitter on training set only
+- **Preprocessing steps:**
+  - StandardScaler normalisation (mean 0, std 1) on training data, persisted in the model bundle
+  - LabelEncoder for the 3-class target (healthy/medium/unhealthy), with explicit ordering
+  - Stratified 80/20 train/test split (seed 42)
 
-**EDA artefacts:** see `assets/screenshots/eda/` (class distribution, image dimension histogram, sample grid).
+- **Feature engineering and selection:** 16 features total — see [`notebooks/03_ml_health_classifier.ipynb`](notebooks/03_ml_health_classifier.ipynb)
+  - 8 raw nutrients: kcal, fat, sat_fat, carbs, sugar, fiber, protein, salt
+  - 5 derived ratios: sugar_to_carb_ratio, sat_fat_pct_of_fat, calorie_density, protein_to_kcal, fiber_to_carb_ratio
+  - 3 WHO-threshold binary flags: high_sugar (>15g), high_salt (>1.5g), high_sat_fat (>5g)
+  - **Augmentation:** 50 samples per class generated with ±15% Gaussian noise around USDA medians → 1000 training rows
 
-### 2.2 ML Numeric Block
+#### 2A.3 Model Selection
 
-This block deserves a candid explanation, because the data pipeline did **not** survive contact with reality and we had to pivot.
+- **Models tested:**
+  - Iteration 1: Logistic Regression (multinomial, L2 regularisation, C=1.0)
+  - Iteration 2: XGBoost Classifier (200 trees, max_depth=5, learning_rate=0.1)
 
-**Original plan: Open Food Facts API.** Open Food Facts (OFF) is a crowdsourced database of ~3 million food products with nutritional information. We wrote a Python client that queried OFF for each of our 20 classes.
+- **Why these models were chosen:**
+  - Logistic Regression as the **linear baseline** — fast, interpretable (coefficients per class), proven on tabular problems
+  - XGBoost as the **non-linear comparison** — typical default for structured/tabular data, captures feature interactions
 
-**What actually happened:** OFF returned 503 Server Errors for 8 of 20 classes during our scraping window, and the data quality for the classes we did receive was poor — querying "caesar salad" returned mineral water, milk, and yoghurt because OFF's full-text search matches partial brand names. The resulting medians were nonsensical (every class had ~51 kcal/100g).
+#### 2A.4 Model Comparison and Iterations
 
-**Pivot: USDA reference values + sample augmentation.** We curated reference nutrition values per 100g for all 20 classes from [USDA FoodData Central](https://fdc.nal.usda.gov/) and the Swiss nutrition database. Eight nutrients per class: kcal, fat, saturated fat, carbohydrates, sugar, fibre, protein, salt.
+| Iteration | Objective | Key changes | Models used | Main metric | Change vs previous |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Establish linear baseline | StandardScaler + LR (C=1.0, multinomial) | LogisticRegression | Test Acc: **100.0%**, F1-macro: 100.0%, CV: 99.88% ± 0.25% | Baseline |
+| 2 | Test if non-linear model improves | XGBoost (200 trees, depth=5) | XGBClassifier | Test Acc: 99.5%, F1-macro: 99.55%, CV: 99.88% ± 0.25% | **-0.5 pp** vs Iter 1 |
+| 3 | N/A — winner already at 100% in Iter 1, further iteration would overfit | — | — | — | — |
 
-We then **augmented** these point values with 50 noisy samples per class (±15% Gaussian noise) to create a training set of 1000 rows. This simulates the real-world variance that different pizza recipes, different chefs, or different national variants of a dish would introduce. The result: a robust, fully reproducible training set with no external dependencies.
+**Final choice:** Logistic Regression. This is counter-intuitive (XGBoost is the usual tabular default), but justified because: (a) higher test accuracy on this data, (b) faster inference, (c) interpretable coefficients, (d) simpler deployment with one less dependency. See artefacts at [`assets/screenshots/ml/model_comparison.csv`](assets/screenshots/ml/model_comparison.csv).
 
-**Feature engineering (16 features total):**
+#### 2A.5 Evaluation and Error Analysis
 
-Raw nutrients (8): kcal, fat, sat_fat, carbs, sugar, fiber, protein, salt
-Derived ratios (5): sugar_to_carb_ratio, sat_fat_pct_of_fat, calorie_density, protein_to_kcal, fiber_to_carb_ratio
-Binary flags (3): high_sugar (>15g), high_salt (>1.5g), high_sat_fat (>5g) — WHO threshold values
+- **Metrics used:** Test accuracy, macro-F1, 5-fold stratified cross-validation, per-class precision/recall/F1, confusion matrix
 
-Health label (target, 3-class): healthy / medium / unhealthy — assigned per food class based on standard nutrition wisdom (e.g. donuts → unhealthy).
+- **Final results:**
+  - Logistic Regression test accuracy: **100.0%**
+  - Per-class F1: healthy 100%, medium 100%, unhealthy 100%
+  - Cross-validation: 99.88% ± 0.25%
+  - See [`assets/screenshots/ml/ml_confusion_matrix.png`](assets/screenshots/ml/ml_confusion_matrix.png) and [`assets/screenshots/ml/feature_importance.png`](assets/screenshots/ml/feature_importance.png)
 
-**Why this is defensible in a project context:** We trade synthetic augmentation against data quality. The USDA values are **authoritative**, the augmentation is **transparent and reproducible**, and the resulting model behaves correctly on real images at inference (verified in §4).
+- **Error patterns and likely causes:** The 100% accuracy reflects that our augmented data is **linearly separable by class** — a consequence of the augmentation methodology (±15% noise around well-defined USDA medians with no class overlap). This is honest evidence that:
+  - The classifier is reliable **within its training distribution**
+  - A real-world deployment would face fuzzier boundaries (deep-dish pizza with extra cheese vs. thin margherita, portion-size variation, hand-prepared dishes diverging from USDA medians)
+  - The model would **not** necessarily achieve 100% on a different data distribution
 
-### 2.3 NLP / RAG Block
+#### 2A.6 Integration with Other Block(s)
 
-**Knowledge base:** Three peer-reviewed / governmental nutrition guidelines:
+- **Inputs received from other block(s):** A single string `food_class` from the CV block (e.g. `"pizza"`)
+- **Outputs provided to other block(s):** A dictionary with `nutrition` (8 raw values), `health_label` (string: healthy/medium/unhealthy), and `probabilities` (per-class confidence). See [`src/ml_model.py`](src/ml_model.py).
 
-| Document | Source | Pages | Characters |
-|---|---|---|---|
-| `who_healthy_diet.pdf` | World Health Organization Fact Sheet | 13 | 18 507 |
-| `dge_10_regeln.pdf` | Deutsche Gesellschaft für Ernährung (DGE) — 10 Rules | 8 | 4 966 |
-| `harvard_healthy_eating.pdf` | Harvard T.H. Chan School of Public Health — Healthy Eating Plate | 6 | 5 306 |
-| **Total** | | **27 pages** | **~29 000 chars** |
+### 2B. NLP
 
-This deliberately mixes **three different perspectives**: WHO (global, policy-oriented), DGE (German, layperson-oriented), Harvard (American, research-oriented). Different framings of the same topic produces richer retrieval results.
+#### 2B.1 Data Source(s)
 
-**Chunking:**
-- Tool: `langchain_text_splitters.RecursiveCharacterTextSplitter`
-- chunk_size = 500 characters
-- chunk_overlap = 100 characters
-- Result: ~60–90 chunks total
+| Entry | Source name or link | Type | Size | Role in this block |
+| --- | --- | --- | --- | --- |
+| 1 | [WHO Healthy Diet Fact Sheet](https://www.who.int/news-room/fact-sheets/detail/healthy-diet) | PDF (13 pages, ~18,500 chars) | 119 KB | Knowledge base — global policy guidelines |
+| 2 | [DGE — 10 Rules of Healthy Eating](https://www.dge.de/gesunde-ernaehrung/dge-ernaehrungsempfehlungen/10-regeln/) | PDF (8 pages, ~5,000 chars) | 778 KB | Knowledge base — German nutrition society, layperson-oriented |
+| 3 | [Harvard Healthy Eating Plate](https://www.hsph.harvard.edu/nutritionsource/healthy-eating-plate/) | PDF (6 pages, ~5,300 chars) | 358 KB | Knowledge base — research-oriented Anglo-American perspective |
 
-**Embeddings:** `sentence-transformers/all-MiniLM-L6-v2` (384-dim, English+multilingual-capable, fast).
+Total: 27 pages, ~29,000 characters. Three deliberately different perspectives produce richer retrieval results than a single source.
 
-**Vector store:** ChromaDB in-memory (persisted to disk via `chroma_db/`).
+#### 2B.2 Preprocessing and Prompt Design
+
+- **Text preprocessing:**
+  - PDF text extraction via `pypdf`
+  - Chunking with `langchain_text_splitters.RecursiveCharacterTextSplitter`
+  - chunk_size = 500 characters, chunk_overlap = 100 characters
+  - Result: ~60–90 chunks total → cached in [`models/rag_chunks.json`](models/rag_chunks.json)
+
+- **Prompt design or retrieval setup:**
+  - Embeddings: `sentence-transformers/all-MiniLM-L6-v2` (384-dim)
+  - Vector store: ChromaDB (in-memory, rebuilt from `rag_chunks.json` on startup)
+  - Top-k retrieval: 3 chunks per query
+  - LLM: OpenAI `gpt-4o-mini`
+  - Two prompt strategies compared (see 2B.4)
+
+#### 2B.3 Approach Selection
+
+- **Approach used:** Retrieval-Augmented Generation (RAG) with sentence-transformer embeddings + LLM. See [`src/nlp_rag.py`](src/nlp_rag.py).
+- **Alternatives considered:**
+  - Fine-tuning a smaller LLM on the guidelines → rejected: training cost vs. benefit unfavourable for 29k chars
+  - Few-shot prompting without retrieval → rejected: would not scale to add new guidelines later
+  - Classical NLP (tf-idf retrieval + extraction) → rejected: cannot generate natural responses
+  - RAG chosen for **best balance** of factual grounding, low cost, and conversational quality
+
+#### 2B.4 Comparison and Iterations
+
+| Iteration | Objective | Key changes | Model or prompt setup | Main metric or qualitative check | Change vs previous |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Establish baseline | Plain "Context: ... Question: ... Answer briefly." | gpt-4o-mini, top-k=3, temp=0.3 | Keyword coverage: **59.4%**, source match: 87.5%, avg tokens: 356 | Baseline |
+| 2 | Test if structure improves quality | XML-tagged sources + strict grounding instruction ("only use sources, else say 'no info'") | gpt-4o-mini, top-k=3, temp=0.3 | Keyword coverage: **36.5%**, source match: 87.5%, avg tokens: 494 | **-22.9 pp coverage, +38% tokens** |
+| 3 | N/A — Strategy 1 dominates on all measurable axes | — | — | — | — |
+
+**Final choice:** Strategy 1 (Basic). The more sophisticated XML prompt's strict "only use sources" constraint caused the LLM to refuse to answer when source phrasings did not exactly match the question (e.g. it refused to discuss eggs because the WHO/DGE documents do not contain the literal word "eggs", although protein sources are clearly addressed). See [`assets/screenshots/rag/rag_strategy_comparison.csv`](assets/screenshots/rag/rag_strategy_comparison.csv) and [`assets/screenshots/rag/rag_evaluation.csv`](assets/screenshots/rag/rag_evaluation.csv).
+
+**Lesson worth keeping:** Prompt structure ≠ prompt quality. Default-mode LLMs already use context effectively; over-restrictive grounding instructions can backfire.
+
+#### 2B.5 Evaluation and Error Analysis
+
+- **Evaluation strategy:** 8 hand-crafted test questions covering different nutrient topics (sugar, salt, fats, balanced meal, etc.), 2 questions in German, 6 in English. For each, measure: keyword coverage (fraction of expected keywords present in the answer), source match (whether the cited source matches the expected one), token count (efficiency).
+
+- **Results:** Strategy 1 wins on every axis. See full per-question results in [`assets/screenshots/rag/rag_evaluation.csv`](assets/screenshots/rag/rag_evaluation.csv).
+
+- **Error patterns and likely causes:**
+  - Q6 "Should I drink milk?" → 0% source match for both strategies because WHO/DGE do not explicitly discuss dairy in the indexed PDFs. Harvard does but in a different chunk than what was retrieved. **Mitigation idea:** add re-ranking or query rewriting.
+  - Q8 "Are eggs healthy?" → Strategy 1 succeeded with high coverage; Strategy 2 refused because "eggs" is not a literal term in the source documents. Demonstrates the over-grounding failure mode.
+
+#### 2B.6 Integration with Other Block(s)
+
+- **Inputs received from other block(s):**
+  - From CV: `food_class` (string)
+  - From ML: `kcal` (float), `health_label` (string) → injected into the prompt as conditioning context
+
+- **Outputs provided to other block(s):** Final user-facing response — markdown answer + list of cited sources. This is the final output of the pipeline; no downstream block consumes it. See [`src/nlp_rag.py`](src/nlp_rag.py).
+
+### 2C. Computer Vision
+
+#### 2C.1 Data Source(s)
+
+| Entry | Source name or link | Type | Size | Role in this block |
+| --- | --- | --- | --- | --- |
+| 1 | [Food-101 dataset](https://www.kaggle.com/datasets/dansbecker/food-101) (20-class subset) | RGB images (224×224) | 15,000 train + 5,000 val | Training + validation data for ViT fine-tuning |
+| 2 | [google/vit-base-patch16-224](https://huggingface.co/google/vit-base-patch16-224) | Pre-trained Vision Transformer | 86M parameters | Base model (transfer learning starting point) |
+
+#### 2C.2 Preprocessing and Augmentation
+
+- **Image preprocessing:**
+  - Resize to 224×224 (ViT input requirement)
+  - ImageNet normalisation: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+
+- **Augmentation strategy:** Training-set only — random horizontal flip + colour jitter (brightness, contrast, saturation). Validation set: no augmentation. See [`notebooks/02_train_vit_cv.ipynb`](notebooks/02_train_vit_cv.ipynb).
+
+#### 2C.3 Model Selection
+
+- **Vision model(s) used:** `google/vit-base-patch16-224` Vision Transformer (pre-trained on ImageNet-21k)
+
+- **Why these model(s) were chosen:** ViT-Base is the standard transformer-based image classifier — comparable in accuracy to ResNet-50 but with attention-based interpretability and a clean Hugging Face integration. The 20-class subset is small enough that we can fully fine-tune in <20 minutes on a single T4 GPU, which fits the time budget of a semester project.
+
+#### 2C.4 Model Comparison and Iterations
+
+| Iteration | Objective | Key changes | Model(s) used | Main metric | Change vs previous |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Head-only fine-tuning baseline | Freeze backbone, train only classification head (0.02% trainable params), 3 epochs, lr=2e-5 | ViT-Base + linear head | Val Acc: **95.12%**, F1-macro: 95.12%, training time: 9:16 min | Baseline |
+| 2 | Full fine-tuning for max accuracy | All 86M params trainable, 3 epochs, lr=2e-5 | ViT-Base full FT | Val Acc: **96.46%**, F1-macro: 96.46%, training time: 15:17 min | **+1.34 pp**, +65% time |
+| 3 | N/A — Iter 2 deployed; further epochs risk overfitting on 15k images | — | — | — | — |
+
+**Final choice:** Iteration 2 (full fine-tuning). The +1.34 pp gain in accuracy is worth the +6 min one-time training cost; inference time is identical (single forward pass). The trained model is published on Hugging Face Hub at [`Gianone/smartplate-vit-food`](https://huggingface.co/Gianone/smartplate-vit-food). See [`assets/screenshots/cv/iteration_comparison.csv`](assets/screenshots/cv/iteration_comparison.csv).
+
+#### 2C.5 Evaluation and Error Analysis
+
+- **Metrics and/or visual checks:** Validation accuracy, macro-F1, per-class confusion matrix, top-K error analysis. See [`assets/screenshots/cv/confusion_matrix.png`](assets/screenshots/cv/confusion_matrix.png).
+
+- **Final results:**
+  - Validation accuracy: **96.46%**
+  - F1-macro: **96.46%**
+  - Best-performing classes: edamame (~99% F1), miso_soup (~98%), french_fries (~98%) — visually distinctive
+  - Hardest pairs: sushi↔sashimi (most-confused pair), donuts↔pancakes (similar shape and texture). See [`assets/screenshots/cv/top_errors.csv`](assets/screenshots/cv/top_errors.csv).
+
+- **Error patterns and limitations:**
+  - Sushi↔sashimi confusion is **acceptable downstream** — both are "healthy" in the ML lookup, so the user experience is unaffected
+  - Donuts↔pancakes confusion is **more consequential** — donuts are "unhealthy", pancakes "medium". Mitigation: confidence score is exposed in the UI; low-confidence predictions (<70%) can be flagged
+  - Food-101 over-represents Western cuisine; classes from under-represented cuisines would likely have lower accuracy in a deployment
+
+#### 2C.6 Integration with Other Block(s)
+
+- **Inputs received from other block(s):** None — CV is the entry point of the pipeline
+- **Outputs provided to other block(s):** A dictionary `{class, confidence, top_5}` consumed by the ML block (for nutrient lookup) and the NLP block (as context in the prompt). See [`src/cv_model.py`](src/cv_model.py).
 
 ---
 
-## 3. Modelling & Implementation
-
-### 3.1 Computer Vision — Vision Transformer
-
-**Model:** `google/vit-base-patch16-224` (pre-trained on ImageNet-21k).
-
-We compared two fine-tuning strategies:
-
-| Iteration | Strategy | Trainable params | Epochs | Wall time | Val Accuracy | Val F1 (macro) |
-|---|---|---|---|---|---|---|
-| 1 | Head-only (linear classifier on frozen backbone) | 0.02% | 3 | 9:16 min | **95.12%** | 95.12% |
-| 2 | Full fine-tuning, lr=2e-5 | 100% | 3 | 15:17 min | **96.46%** | 96.46% |
-
-**Decision:** Iteration 2 (full fine-tuning) chosen for the deployed model. The 1.34 percentage-point gain in accuracy comes at 65% higher training time but **identical inference time**. For a one-time training cost, the gain is worth it.
-
-**Trained model on Hugging Face Hub:** [`Gianone/smartplate-vit-food`](https://huggingface.co/Gianone/smartplate-vit-food) (343 MB).
-
-**Artefacts:**
-- Notebook: [`notebooks/02_train_vit_cv.ipynb`](notebooks/02_train_vit_cv.ipynb)
-- Confusion matrix: [`assets/screenshots/cv/confusion_matrix.png`](assets/screenshots/cv/confusion_matrix.png)
-- Iteration comparison: [`assets/screenshots/cv/iteration_comparison.csv`](assets/screenshots/cv/iteration_comparison.csv)
-- Top errors: [`assets/screenshots/cv/top_errors.csv`](assets/screenshots/cv/top_errors.csv)
-
-### 3.2 ML Numeric — Health Classifier
-
-We compared two algorithms on the augmented USDA training set:
-
-| Iteration | Algorithm | Test Accuracy | Test F1 (macro) | CV Accuracy | Training time |
-|---|---|---|---|---|---|
-| 1 | Logistic Regression (multinomial, L2 reg.) | **100.0%** | **100.0%** | 99.88% ± 0.25% | ~1 s |
-| 2 | XGBoost (200 trees, depth=5) | 99.5% | 99.55% | 99.88% ± 0.25% | ~5 s |
-
-**Decision:** Logistic Regression wins on this dataset. This is **counter-intuitive** — XGBoost is the usual default for tabular data. We chose LR because:
-
-1. **Higher test accuracy** on this specific data (the augmentation produces linearly separable classes by design)
-2. **Faster inference** (matrix multiplication vs. tree traversal)
-3. **Interpretable** — we can show coefficients per class as evidence of why a prediction was made
-4. **Simpler deployment** — no XGBoost dependency on Hugging Face Spaces
-
-The 100% test accuracy is a **flag, not a triumph**: it indicates that our augmented data is well-separated by class, which is partly a consequence of the augmentation methodology (noise around well-defined USDA medians). The model would not necessarily achieve 100% on data sampled from a different distribution — see §4 for the honest discussion.
-
-**Artefacts:**
-- Notebook: [`notebooks/03_ml_health_classifier.ipynb`](notebooks/03_ml_health_classifier.ipynb)
-- Trained model: [`models/health_classifier.pkl`](models/health_classifier.pkl) (4.6 KB)
-- Confusion matrix: [`assets/screenshots/ml/ml_confusion_matrix.png`](assets/screenshots/ml/ml_confusion_matrix.png)
-- Feature importance: [`assets/screenshots/ml/feature_importance.png`](assets/screenshots/ml/feature_importance.png)
-- Comparison: [`assets/screenshots/ml/model_comparison.csv`](assets/screenshots/ml/model_comparison.csv)
-
-### 3.3 NLP / RAG Pipeline
-
-**LLM:** OpenAI `gpt-4o-mini` (chosen for low cost ~$0.0001 per call, fast latency, sufficient quality for this task).
-
-We compared two **prompt engineering strategies** on a fixed set of 8 test questions:
-
-| Strategy | Description |
-|---|---|
-| 1 — Basic | Plain `Context: ... \n\n Question: ... \n\n Answer briefly.` |
-| 2 — Structured XML | Roles, XML-delimited sources, explicit "answer only from sources" grounding constraint |
-
-**Evaluation results:**
-
-| Metric | Strategy 1 (Basic) | Strategy 2 (XML) | Winner |
-|---|---|---|---|
-| Avg keyword coverage | **59.4%** | 36.5% | Strategy 1 (+22.9 pp) |
-| Source match rate | 87.5% | 87.5% | Tie |
-| Avg tokens used | **356** | 494 | Strategy 1 (-28%) |
-
-**Decision:** Strategy 1 wins on every measurable axis. This was the most instructive finding of the project.
-
-**Why was the more sophisticated prompt worse?** Strategy 2's strict grounding constraint ("if sources don't contain the answer, say 'I don't have that information'") caused the LLM to **refuse to answer** on questions where the sources contained relevant material but not exact phrasings. Strategy 1 was more liberal in its use of context and produced more useful answers.
-
-> **Lesson:** Prompt structure ≠ prompt quality. Default-mode LLMs already know how to use context; explicit instructions to "only use the sources" can backfire by over-restricting the response space. This finding generalised across all 8 test questions, not just one.
-
-**Production prompt (used in the app):** A hybrid that takes Strategy 1's flexibility but adds the SmartPlate domain context (food class, kcal, health label as part of the input). See `src/nlp_rag.py:answer()`.
-
-**Artefacts:**
-- Notebook: [`notebooks/04_rag_setup.ipynb`](notebooks/04_rag_setup.ipynb)
-- Knowledge base chunks: [`models/rag_chunks.json`](models/rag_chunks.json) (45 KB)
-- RAG config: [`models/rag_config.json`](models/rag_config.json)
-- Evaluation results: [`assets/screenshots/rag/rag_evaluation.csv`](assets/screenshots/rag/rag_evaluation.csv)
-- Strategy comparison: [`assets/screenshots/rag/rag_strategy_comparison.csv`](assets/screenshots/rag/rag_strategy_comparison.csv)
-
-### 3.4 Integration — `SmartPlatePipeline`
-
-All three blocks are orchestrated by the `SmartPlatePipeline` class in `src/pipeline.py`:
-
-```python
-class SmartPlatePipeline:
-    def __init__(self):
-        # Lazy-load all three models
-        self._cv = None
-        self._ml = None
-        self._rag = None
-
-    def process(self, image: PIL.Image, user_question: str = None) -> dict:
-        # 1. CV: classify food
-        cv_result = self.cv.predict(image)
-
-        # 2. ML: get nutrition + health
-        ml_result = self.ml.predict(cv_result["class"])
-
-        # 3. NLP: generate answer
-        nlp_result = self.rag.answer(
-            food_class=cv_result["class"],
-            kcal=ml_result["nutrition"]["kcal"],
-            health_label=ml_result["health_label"],
-            user_question=user_question,
-        )
-
-        return {"cv_result": cv_result, "ml_result": ml_result, "nlp_result": nlp_result}
-```
-
-**Lazy loading:** Models are only loaded the first time they are used. This matters on Hugging Face Spaces, where the cold-start time would otherwise be ~90 seconds (ViT download + ChromaDB build). With lazy loading, the user sees the UI immediately and pays the cost on first submit.
-
----
-
-## 4. Evaluation & Analysis
-
-### 4.1 CV Block — Per-Class Performance
-
-See [`assets/screenshots/cv/confusion_matrix.png`](assets/screenshots/cv/confusion_matrix.png).
-
-**Best-performing classes:** edamame (99% F1), miso_soup (98%), french_fries (98%) — these are visually distinctive.
-
-**Hardest classes:** sushi vs. sashimi (most confused pair) and donuts vs. pancakes (similar circular shape, similar dough texture). See [`assets/screenshots/cv/top_errors.csv`](assets/screenshots/cv/top_errors.csv) for the top 20 misclassifications.
-
-**Why sushi↔sashimi confusion is acceptable:** Both are healthy categories in our ML lookup, so the downstream pipeline gives essentially identical advice. The CV error does not propagate to a meaningfully different user experience.
-
-**Why donuts↔pancakes confusion matters more:** Donuts are tagged "unhealthy" (high sugar, high fat), pancakes "medium". A misclassification here could give the user systematically wrong health advice. **Mitigation:** the ViT confidence score is exposed in the UI — when the top prediction is below ~70% confidence, the user is encouraged to retake the photo.
-
-### 4.2 ML Block — Honest Discussion of 100% Accuracy
-
-The Logistic Regression reaches 100% accuracy on the held-out test set. This is the kind of number that should make a sceptical reader uncomfortable, so we want to be transparent about what it means and what it does not mean.
-
-**What it means:** the 16-dimensional feature space produced by the augmentation procedure is linearly separable into the three health tiers. Given the augmentation (±15% Gaussian noise around well-defined USDA medians, with no class overlap in the medians), this is not surprising — pizza's kcal/100g distribution does not overlap with edamame's, and so on across every dimension.
-
-**What it does not mean:** the model is not "perfect". A real-world deployment would face:
-- Hand-prepared dishes whose actual nutrition differs substantially from USDA medians (e.g. a deep-dish pizza with sausage vs. a thin-crust margherita)
-- Portion-size effects (we predict per 100g; the user might be looking at 300g)
-- Class boundaries that are inherently fuzzy (is a sushi roll with mayonnaise "medium" or "unhealthy"?)
-
-We accept the 100% as evidence that the classifier is reliable **within its training distribution** and document its limitations clearly.
-
-### 4.3 RAG Block — Qualitative Error Analysis
-
-See [`assets/screenshots/rag/rag_evaluation.csv`](assets/screenshots/rag/rag_evaluation.csv) for full per-question results.
-
-Strategy 1 had two failure cases worth examining:
-
-**Q6: "Should I drink milk?"** — Source match rate dropped to 0% because the WHO and DGE documents do not explicitly discuss dairy. Harvard does but in a different chunk than what was retrieved. **Mitigation:** add a second retrieval pass with re-ranking — out of scope for this project, noted as future work.
-
-**Q8: "Are eggs healthy?"** — Strategy 1 succeeded with high coverage; Strategy 2 refused to answer because the documents do not contain the word "eggs" explicitly (they talk about protein sources in general). This illustrates the **over-strict grounding** failure mode we observed.
-
-### 4.4 End-to-End Integration Test
-
-Three real-image scenarios were tested via the live app (screenshots in [`assets/screenshots/app/`](assets/screenshots/app/)):
-
-| Input image | CV Output | ML Output | NLP Output (excerpt) |
-|---|---|---|---|
-| Pizza ([`Pizza.png`](assets/screenshots/app/Pizza.png)) | pizza, 100% confidence | unhealthy, 95% | "Pizza can be a delicious treat... portion control or pairing with a side salad..." |
-| Burger ([`Burger.png`](assets/screenshots/app/Burger.png)) | hamburger, high confidence | unhealthy | Balanced response with practical alternatives |
-| Salad ([`Salat.png`](assets/screenshots/app/Salat.png)) | greek_salad, high confidence | healthy | Positive reinforcement + portion guidance for cheese/olives |
-
-All three scenarios produce sensible, non-moralising, source-cited responses — which is the **explicit design goal** of the system. The model is calibrated to be helpful, not preachy.
-
----
-
-## 5. Deployment
-
-### 5.1 Architecture — Training/Inference Separation
-
-The project enforces a strict separation between training and inference, as required by the assignment:
-
-| | Where it lives | What runs there |
-|---|---|---|
-| **Training** | `notebooks/` (Jupyter notebooks 01–04) | EDA, fine-tuning, evaluation, comparison plots |
-| **Inference** | `src/` (Python modules) + `app.py` | Lazy-loaded production models, Gradio UI |
-
-The trained CV model lives on Hugging Face Hub (`Gianone/smartplate-vit-food`). The trained ML model lives in the repository (`models/health_classifier.pkl`, 4.6 KB). The RAG knowledge base lives in the repository (`data/knowledge_base/` and `models/rag_chunks.json`).
-
-At runtime, the app loads these artefacts and serves predictions — **no training code is ever executed in production**.
-
-### 5.2 Hosting
-
-**Hugging Face Spaces:** [`Gianone/smartplate`](https://huggingface.co/spaces/Gianone/smartplate)
-
-- Hardware: CPU basic (free tier)
-- SDK: Gradio 4.32.0 (downgraded from 4.36.0 to bypass internal schema-parsing bugs)
-- Python: 3.10 (forced via README header — Python 3.13 has incompatibility with Gradio's `pydub` dependency)
-- Secret: `OPENAI_API_KEY` (configured in Space Settings)
-- Dependency pin: `huggingface_hub==0.24.7` (compatibility with Gradio 4.32 OAuth module)
-
-### 5.3 Build & Iteration Notes
-
-Deployment did not work on the first attempt. The build failed **four times** before succeeding — a useful lesson in MLOps reality that we document honestly:
-
-1. **Attempt 1 — Gradio version conflict.** Our `requirements.txt` pinned Gradio 4.44.0, but HF Spaces provides its own Gradio via `sdk_version`. Fix: remove Gradio from `requirements.txt`.
-2. **Attempt 2 — Python 3.13 + `audioop` removal.** HF defaulted to Python 3.13, but Gradio 4.36 imports `pydub` which imports `audioop` — a stdlib module removed in Python 3.13. Fix: set `python_version: '3.10'` in the README header.
-3. **Attempt 3 — `huggingface_hub` API change.** Default `huggingface_hub` removed the `HfFolder` symbol that Gradio 4.36's OAuth module still imports. Fix: pin `huggingface_hub==0.24.7` in `requirements.txt`.
-4. **Attempt 4 — Gradio API schema parser bug.** Gradio 4.32/4.36's automatic API info generator crashed on our `dict`-typed pipeline outputs with `APIInfoParseError: Cannot parse schema True`. Fix: apply a monkey-patch in `app.py` that wraps `gradio_client.utils._json_schema_to_python_type` and related functions to return `"Any"` for non-dict schemas instead of raising. The patch is the first thing the file does after importing Gradio.
-
-These iterations are documented in the git history of the HF Space repository. They are a typical experience deploying ML systems and the kind of friction that real-world MLOps engineers manage daily. The fix in attempt 4 is particularly worth keeping in the codebase even if a future Gradio version repairs the underlying bug — it costs nothing and provides cheap robustness.
-
-### 5.4 Screenshots
-
-**Local app (development testing)** — `assets/screenshots/app/`:
-
-| Pizza analysis | Burger analysis | Salad analysis |
-|---|---|---|
-| ![Pizza](assets/screenshots/app/Pizza.png) | ![Burger](assets/screenshots/app/Burger.png) | ![Salad](assets/screenshots/app/Salat.png) |
-
-**Live HF Space (production)** — `assets/screenshots/deployment/`:
-
-The same pipeline running on Hugging Face Spaces with all four blocks integrated (CV detection, ML nutrition + health, NLP advice, source citations). See [`assets/screenshots/deployment/`](assets/screenshots/deployment/) for the production screenshots.
+## 3. Deployment
+
+- **Deployment URL:** https://huggingface.co/spaces/Gianone/smartplate
+- **Main user flow:**
+  1. User uploads a food photo via the Gradio UI
+  2. (Optional) Types a question (e.g. "Can I eat this on a diet?")
+  3. Clicks Analyze
+  4. CV → ML → NLP run sequentially (~30 s on first run, ~5 s steady-state)
+  5. UI displays: detected food class + confidence, top-5 predictions, nutrition table per 100g, health category with probabilities, and the NLP-generated explanation with cited sources
+
+- **Screenshot or short demo:**
+
+| Local app screenshots (`assets/screenshots/app/`) | Live HF Space screenshots (`assets/screenshots/deployment/`) |
+| --- | --- |
+| ![`Pizza.png`](assets/screenshots/app/Pizza.png), ![`Burger.png`](assets/screenshots/app/Burger.png), ![`Salat.png`](assets/screenshots/app/Salat.png) | ![`Hamburger_HF.png`](assets/screenshots/deployment/Hamburger_HF.png), ![`Pizza_HF_question.png`](assets/screenshots/deployment/Pizza_HF_question.png), ![`Salat_HF.png`](assets/screenshots/deployment/Salat_HF.png) |
 
 All screenshots show the complete pipeline: image preview, CV prediction with confidence, nutrition table, health label with probabilities, and the LLM's evidence-grounded explanation with source citations.
 
+**Training/inference separation:** Training code lives exclusively in the four Jupyter notebooks (`notebooks/01_eda_food101.ipynb` through `04_rag_setup.ipynb`). Inference code lives in `src/` and `app.py`. The trained ViT model is hosted on Hugging Face Hub (`Gianone/smartplate-vit-food`); the trained ML model is committed at [`models/health_classifier.pkl`](models/health_classifier.pkl); RAG chunks at [`models/rag_chunks.json`](models/rag_chunks.json). No training code is ever executed in production.
+
+**Deployment friction documented honestly:** The HF Spaces build failed four times before succeeding (Gradio version conflict, Python 3.13 audioop bug, huggingface_hub API change, Gradio API-schema parser bug fixed with a monkey-patch in [`app.py`](app.py)). All four are documented in the HF Space's git history.
+
 ---
 
-## 6. Execution Instructions
+## 4. Execution Instructions
 
-### 6.1 Try the Live App
-
-The simplest path: open [https://huggingface.co/spaces/Gianone/smartplate](https://huggingface.co/spaces/Gianone/smartplate) in a browser, upload a food photo, click Analyze. No installation required.
-
-### 6.2 Run Locally
-
-**Prerequisites:** Python 3.9 or higher, `git`, OpenAI API key.
+### Environment setup
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Gianone-byte/smartplate
+git clone https://github.com/Gianone-byte/smartplate.git
 cd smartplate
-
-# 2. Create + activate virtual environment
 python3 -m venv .venv
-source .venv/bin/activate          # macOS / Linux
-# .venv\Scripts\activate           # Windows
-
-# 3. Install dependencies
+source .venv/bin/activate      # macOS / Linux
+# .venv\Scripts\activate       # Windows
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# 4. Configure OpenAI key
-cp .env.example .env
-# → open .env in any editor and replace `your-key-here` with a real OpenAI API key
-
-# 5. Run the app
-python app.py
-# → opens http://127.0.0.1:7860 in your browser
 ```
 
-**First-time startup** takes ~60 seconds because the ViT model (~340 MB) is downloaded from Hugging Face Hub and the ChromaDB vector store is built from the PDFs. Subsequent runs are cached.
+### Data setup
 
-### 6.3 Re-train the Models
+The repository ships with all required artefacts:
+- ML model: [`models/health_classifier.pkl`](models/health_classifier.pkl) (4.6 KB)
+- RAG chunks: [`models/rag_chunks.json`](models/rag_chunks.json) (45 KB)
+- Knowledge base PDFs: [`data/knowledge_base/`](data/knowledge_base/)
 
-If you want to reproduce the training pipeline rather than use the released models, the four Jupyter notebooks (in `notebooks/`) run end-to-end:
+The CV model is downloaded automatically from Hugging Face Hub on first run (`Gianone/smartplate-vit-food`, ~340 MB).
 
-| Notebook | What it does | Runtime |
-|---|---|---|
-| `01_eda_food101.ipynb` | EDA on the 20-class Food-101 subset | ~10 min |
-| `02_train_vit_cv.ipynb` | Fine-tune ViT (T4 GPU recommended) | ~25 min |
-| `03_ml_health_classifier.ipynb` | Train the health classifier | ~2 min |
-| `04_rag_setup.ipynb` | Build the RAG vector store + evaluate | ~5 min |
+### Training command(s)
 
-All notebooks were developed and tested on Google Colab (T4 GPU instance for notebook 02). They will also run locally if a GPU is available.
-
-### 6.4 Run the Tests
+Optional — only needed to reproduce models from raw data. All four notebooks run end-to-end:
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests/ -v
+jupyter notebook notebooks/01_eda_food101.ipynb          # ~10 min, EDA
+jupyter notebook notebooks/02_train_vit_cv.ipynb         # ~25 min, T4 GPU recommended
+jupyter notebook notebooks/03_ml_health_classifier.ipynb # ~2 min, CPU
+jupyter notebook notebooks/04_rag_setup.ipynb            # ~5 min, CPU + OpenAI API
 ```
 
-Expected output: **18 passed**. Tests cover module importability, pipeline lazy-loading, and end-to-end ML predictions on all 20 classes.
+### Inference/run command(s)
+
+```bash
+cp .env.example .env
+# → open .env and add OPENAI_API_KEY
+python app.py
+# → opens http://127.0.0.1:7860
+```
+
+### Reproducibility notes
+
+- Random seeds: `42` everywhere (numpy, sklearn, transformers Trainer)
+- Pinned versions: `scikit-learn==1.5.1` (matches training environment), `huggingface_hub==0.24.7` (Gradio 4.32 compatibility)
+- Python: 3.9 supported locally; Python 3.10 required on HF Spaces (declared in `README.md` SDK metadata)
+- All 18 smoke tests in `tests/test_pipeline.py` should pass: `python -m pytest tests/ -v`
 
 ---
 
-## Bonus: Ethical Considerations
+## 5. Optional Bonus Evidence
 
-We list a few areas where a project of this kind should be cautious. They are out of scope for the prototype but worth naming for a hypothetical production deployment.
+- [x] **Third selected block implemented with strong quality** — ML Numeric Data implemented as full block (USDA-derived dataset, feature engineering, 2-model comparison, evaluation) and integrated into the pipeline. See Section 2A.
+- [x] **More than two data sources used with clear added value** — Six distinct sources used: Food-101 dataset (CV training), pre-trained ViT (CV transfer learning), USDA nutrition values (ML labels), augmented synthetic dataset (ML training), WHO + DGE + Harvard PDFs (3 separate RAG sources). Each has a justified role.
+- [x] **A core section is done exceptionally well** — Section 2B (NLP/RAG) includes a quantitative prompt-strategy comparison with 8 test questions, three measured metrics, and a non-obvious finding (the simpler prompt outperforms the more structured one). The result is reported honestly with the failure-mode explanation.
+- [x] **Extended evaluation** — Confusion matrices for both CV and ML blocks, feature importance plot for ML, per-question RAG evaluation CSV, per-class CV error analysis CSV. All committed under `assets/screenshots/`.
+- [x] **Ethics, bias, or fairness analysis** — Dedicated discussion of health-advice liability, training-data bias (Food-101 over-represents Western cuisine), eating-disorder safety considerations, and data-privacy commitments. See in-line discussion at end of Section 5 below.
+- [ ] Creative or exceptional use case — see honest self-assessment: the use case is realistic and well-motivated but not unprecedented (similar apps exist commercially).
 
-**Health-advice liability.** SmartPlate generates dietary suggestions. It is not a substitute for advice from a registered dietitian or doctor. The deployed app makes this clear in the footer, but a production version would need clearer disclaimers, and probably geographic gating (the FDA, the EU, and Swissmedic regulate health-claim advice differently).
+### Ethics, bias and fairness — additional discussion
 
-**Bias in the training data.** Food-101 over-represents Western cuisine (American burgers, Italian pizza, French pastries). Our 20-class subset preserves this bias. The system will be less accurate on dishes from cuisines under-represented in Food-101, and the per-class confidence scores allow users to detect this — but only if they know what to look for.
+This is a project for academic use and is documented as such. A production deployment would require the following safeguards, which are out of scope for the prototype but are worth naming:
 
-**Eating-disorder safety.** A nutrition app can be triggering for users with eating disorders. The prompt was deliberately designed to avoid moralising language ("bad food", "forbidden", "you should not eat this") and to acknowledge the emotional side of food. A production version would need explicit content guardrails for known triggering phrases and a clear path to support resources.
-
-**Privacy.** Photos are processed in-memory and not stored. Conversation history is not retained between sessions. The OpenAI API does log requests (per their terms of service) — this is documented but should be made more prominent in a production deployment.
-
-**Reproducibility.** Every artefact in the project (model files, RAG chunks, evaluation CSVs, plots) is committed to git or referenced from Hugging Face Hub. The four notebooks reproduce all results from raw data. No "magic numbers" or undocumented hyperparameters.
-
----
-
-## Acknowledgements
-
-This project was developed during the ZHAW "KI-Anwendungen" module (Spring Semester 2026), supervised by Jasmin Heierli and Benjamin Kühnis. The course materials, particularly the slide decks on RAG, prompt engineering, and Vision Transformers, provided the foundation for every block of this project.
-
-Outside the course materials, this project relies on open-source models and libraries: Hugging Face's `transformers` for ViT, `sentence-transformers` for embeddings, `chromadb` for vector storage, `scikit-learn` for the health classifier, and `gradio` for the UI. The nutrition guidelines were sourced from the World Health Organization, the German Nutrition Society (DGE), and the Harvard T.H. Chan School of Public Health under their respective public-use terms.
+- **Health-advice liability.** SmartPlate generates dietary suggestions. It is not a substitute for advice from a registered dietitian or doctor. A production version would need clear disclaimers and probably geographic gating (FDA, EU and Swissmedic each regulate health-claim advice differently).
+- **Training-data bias.** Food-101 over-represents Western cuisine (burgers, pizza, French pastries). The system will be less accurate on dishes from cuisines under-represented in Food-101. Per-class confidence scores expose this when accuracy drops, but only to users who know what to look for.
+- **Eating-disorder safety.** A nutrition app can be triggering for users with eating disorders. The production prompt was deliberately designed to avoid moralising language ("bad food", "forbidden", "you should not eat this") and to acknowledge the emotional side of food. A production version would need explicit content guardrails for known triggering phrases and a clear path to support resources.
+- **Privacy.** Photos are processed in-memory and not stored. Conversation history is not retained between sessions. The OpenAI API does log requests per their terms of service — this is documented in `documentation.md` but would need more prominence in a real deployment.
+- **Reproducibility.** Every artefact is either committed to git or referenced from Hugging Face Hub. The four notebooks reproduce all results from raw data with fixed seeds. No undocumented hyperparameters.
