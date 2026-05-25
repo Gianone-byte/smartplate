@@ -1,68 +1,57 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
-.venv/
-venv/
-env/
-pip-log.txt
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-
-# Environment
-.env
-*.env.local
-
-# Data (large files, gitignored)
-data/raw/
-data/processed/
-
-# Models (large binary files)
-models/*.pkl
-models/*.safetensors
-models/*.bin
-models/*.pt
-models/*.pth
-models/checkpoint-*/
-
-# Vector DB
-chroma_db/
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Logs
-*.log
-logs/
-
-# Distribution
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-
-# mypy
-.mypy_cache/
-.dmypy.json
 
 # Claude Code config
+# Data (large files, gitignored)
+# Distribution
+# Environment
+# IDEs
+# Jupyter
+# Logs
+# Models (large binary files)
+# Python
+# Vector DB
+# macOS
+# mypy
+*$py.class
+*.cover
+*.egg
+*.egg-info/
+*.env.local
+*.ipynb_checkpoints
+*.log
+*.py[cod]
+*.so
+*.swo
+*.swp
+.AppleDouble
+.DS_Store
+.LSOverride
 .claude/
-
+.coverage
+.coverage.*
+.dmypy.json
+.eggs/
+.env
+.idea/
+.ipynb_checkpoints/
+.mypy_cache/
+.tox/
+.venv/
+.vscode/
+__pycache__/
+build/
+chroma_db/
+coverage.xml
+data/processed/
+data/raw/
+dist/
+env/
+htmlcov/
+logs/
+models/*.bin
+models/*.pkl
+models/*.pt
+models/*.pth
+models/*.safetensors
+models/checkpoint-*/
+pip-log.txt
+venv/
