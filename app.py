@@ -179,4 +179,4 @@ with gr.Blocks(
 
 if __name__ == "__main__":
     share = os.getenv("GRADIO_SHARE", "false").lower() == "true"
-    demo.launch(share=share)
+    demo.launch(show_api=False)
